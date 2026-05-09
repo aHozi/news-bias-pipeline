@@ -85,8 +85,3 @@ kedro viz
 - [Kedro Documentation](https://docs.kedro.org/)
 - [spaCy NER](https://spacy.io/)
 ---
-## 📝 License
-
-See [LICENSE](LICENSE) file for details
-
-© 2026 Klesti Hoxha
