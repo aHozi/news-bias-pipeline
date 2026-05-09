@@ -1,0 +1,7 @@
+# This is a boilerplate parameters config generated for pipeline 'data_processing'
+# using Kedro 1.0.0.
+#
+# Documentation for this file format can be found in "Parameters"
+# Link: https://docs.kedro.org/en/1.0.0/configuration/parameters.html
+
+langid_model_path: "data/06_models/langid/langid-model.txt"

@@ -1,0 +1,31 @@
+{
+  "name": "popularity-metrics-dashboard",
+  "version": "1.0.0",
+  "description": "Interactive dashboard for news bias pipeline popularity metrics",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dev": "vite",
+    "serve": "node server.js"
+  },
+  "keywords": ["kedro", "pipeline", "metrics"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "compression": "^1.7.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.10.0",
+    "lucide-react": "^0.263.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite": "^4.3.0",
+    "vite-plugin-copy": "^0.1.6"
+  }
+}
+

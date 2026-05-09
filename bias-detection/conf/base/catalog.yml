@@ -1,0 +1,20 @@
+# Here you can define all your datasets by using simple YAML syntax.
+#
+# Documentation for this file format can be found in "The Data Catalog"
+# Link: https://docs.kedro.org/en/stable/data/data_catalog.html
+
+# Factory pattern for raw inputs
+articles_{source}:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/articles_{source}.csv
+
+# Single combined output
+articles_cleaned:
+  type: pandas.CSVDataset
+  filepath: data/02_intermediate/articles_cleaned.csv
+
+
+# Popularity people metrics
+popularity_people_metrics:
+  type: pandas.CSVDataset
+  filepath: data/03_primary/popularity_people_metrics.csv

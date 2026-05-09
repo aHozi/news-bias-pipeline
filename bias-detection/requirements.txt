@@ -1,0 +1,9 @@
+ipython>=8.10
+jupyterlab>=3.0
+notebook
+kedro~=1.0.0
+pandas>=1.3.0
+kedro-datasets>=1.0.0
+kedro-viz>=4.0.0
+langid==1.1.6
+spacy>=3.8.14
