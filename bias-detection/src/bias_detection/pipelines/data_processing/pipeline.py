@@ -1,7 +1,12 @@
 from kedro.pipeline import Pipeline, node, pipeline
-from .nodes import clean_articles, combine_articles, filter_albanian_articles
+from .nodes import (
+    clean_articles,
+    combine_articles,
+    filter_albanian_articles,
+    normalize_source_article_counts,
+)
 
-SOURCES = ["tch", "klan"]  # just add more here as needed
+SOURCES = ["tch", "klan", "reporttv", "news24", "euronews", "abc", "vizionplus", "rtsh"]
 
 def create_pipeline(**kwargs) -> Pipeline:
     clean_nodes = [
@@ -24,8 +29,15 @@ def create_pipeline(**kwargs) -> Pipeline:
     filter_albanian = node(
         func=filter_albanian_articles,
         inputs=["articles_combined", "params:langid_model_path"],
-        outputs="articles_cleaned",
+        outputs="articles_albanian",
         name="filter_albanian_node",
     )
 
-    return pipeline(clean_nodes + [combine, filter_albanian])
+    normalize_sources = node(
+        func=normalize_source_article_counts,
+        inputs=["articles_albanian", "params:articles_per_source_target"],
+        outputs="articles_cleaned",
+        name="normalize_source_article_counts_node",
+    )
+
+    return pipeline(clean_nodes + [combine, filter_albanian, normalize_sources])

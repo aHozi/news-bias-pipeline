@@ -1,486 +1,688 @@
-import React, { useState, useEffect } from 'react'
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { Search, AlertCircle, Zap } from 'lucide-react'
+import React, { useEffect, useMemo, useState } from 'react'
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  Cell,
+} from 'recharts'
+import {
+  CalendarDays,
+  Flag,
+  Moon,
+  Radio,
+  Search,
+  Sun,
+} from 'lucide-react'
 import './App.css'
 
-function App() {
-  const [data, setData] = useState([])
-  const [filteredData, setFilteredData] = useState([])
-  const [searchTerm, setSearchTerm] = useState('')
-  const [selectedSource, setSelectedSource] = useState('all')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [stats, setStats] = useState({})
-  const [biasView, setBiasView] = useState('disparity') // 'disparity' or 'coverage'
-  const [currentPage, setCurrentPage] = useState(1)
-  const itemsPerPage = 20
+const SOURCES = [
+  { id: 'tch', name: 'Top Channel' },
+  { id: 'klan', name: 'TV Klan' },
+  { id: 'reporttv', name: 'Report TV' },
+  { id: 'news24', name: 'News 24 / BalkanWeb' },
+  { id: 'euronews', name: 'Euronews Albania' },
+  { id: 'abc', name: 'ABC News Albania' },
+  { id: 'vizionplus', name: 'Vizion Plus' },
+  { id: 'rtsh', name: 'RTSH' },
+]
 
-  const sourceMapping = {
-    'klan': 'TV Klan',
-    'tch': 'Top Channel'
-  }
+const PARTIES = [
+  { id: 'PS', name: 'Partia Socialiste', short: 'PS', color: '#ec4899' }, // Pink
+  { id: 'PD', name: 'Partia Demokratike', short: 'PD', color: '#3b82f6' }, // Blue
+  { id: 'PL', name: 'Partia e Lirisë', short: 'PL', color: '#ef4444' }, // Red
+  { id: 'MUNDESIA', name: 'Partia Mundësia', short: 'Mundësia', color: '#d99138' },
+]
 
-  useEffect(() => {
-    loadData()
-  }, [])
+function parseCSV(text) {
+  const rows = []
+  let row = []
+  let value = ''
+  let inQuotes = false
 
-  const loadData = async () => {
-    try {
-      setLoading(true)
-      // Adjust path based on your setup
-      const response = await fetch('popularity_people_metrics.csv')
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    const nextChar = text[index + 1]
 
-      if (!response.ok) {
-        throw new Error('Data file not found. Run the pipeline first: kedro run --pipeline=popularity_metrics')
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        value += '"'
+        index += 1
+      } else {
+        inQuotes = !inQuotes
       }
-
-      const text = await response.text()
-      const rows = text.trim().split('\n')
-      const headers = rows[0].split(',')
-
-      const parsed = rows.slice(1).map(row => {
-        const values = row.split(',')
-        const rawSource = values[1]?.trim().replace(/^"|"$/g, '')
-        return {
-          name: values[0]?.trim().replace(/^"|"$/g, ''),
-          source: sourceMapping[rawSource] || rawSource,
-          total_mentions: parseInt(values[2]) || 0
-        }
-      }).filter(item => item.name && item.source)
-
-      setData(parsed)
-      calculateStats(parsed)
-      filterData(parsed, '', 'all')
-      setError(null)
-    } catch (err) {
-      setError(err.message)
-      setLoading(false)
+    } else if (char === ',' && !inQuotes) {
+      row.push(value)
+      value = ''
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && nextChar === '\n') index += 1
+      row.push(value)
+      rows.push(row)
+      row = []
+      value = ''
+    } else {
+      value += char
     }
   }
 
-  const calculateStats = (dataset) => {
-    const uniquePeople = new Set(dataset.map(d => d.name)).size
-    const uniqueSources = new Set(dataset.map(d => d.source)).size
-    const totalMentions = dataset.reduce((sum, d) => sum + d.total_mentions, 0)
-    const avgMentions = Math.round(totalMentions / dataset.length)
-
-    setStats({
-      uniquePeople,
-      uniqueSources,
-      totalMentions,
-      avgMentions
-    })
-    setLoading(false)
+  if (value.length > 0 || row.length > 0) {
+    row.push(value)
+    rows.push(row)
   }
 
-  const filterData = (dataset, search, source) => {
-    let filtered = dataset
+  const [headers = [], ...dataRows] = rows.filter((item) => item.some((cell) => cell !== ''))
+  return dataRows.map((dataRow) =>
+    headers.reduce((record, header, index) => {
+      record[header] = dataRow[index] ?? ''
+      return record
+    }, {})
+  )
+}
 
-    if (source !== 'all') {
-      filtered = filtered.filter(item => item.source === source)
+async function fetchCSV(path) {
+  const response = await fetch(path)
+  if (!response.ok) return []
+  return parseCSV(await response.text())
+}
+
+function numberValue(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function toneLabel(value) {
+  const label = String(value || 'Neutral').trim()
+  return ['Positive', 'Neutral', 'Negative'].includes(label) ? label : 'Neutral'
+}
+
+function partyConfig(id) {
+  return PARTIES.find((party) => party.id === id) || PARTIES[0]
+}
+
+function sourceName(id) {
+  return SOURCES.find((source) => source.id === id)?.name || id
+}
+
+function isTrue(value) {
+  return String(value).toLowerCase() === 'true'
+}
+
+function aggregateMentionRows(rows) {
+  const groupedRows = {}
+
+  rows.forEach((row) => {
+    if (!PARTIES.find((party) => party.id === row.party)) return
+
+    const key = `${row.source}-${row.published_date || 'unknown'}-${row.party}`
+    if (!groupedRows[key]) {
+      groupedRows[key] = {
+        source: row.source,
+        published_date: row.published_date || 'unknown',
+        party: row.party,
+        mentions: 0,
+        articles: new Set(),
+        title_mentions: 0,
+        positive_mentions: 0,
+        neutral_mentions: 0,
+        negative_mentions: 0,
+        sentimentSum: 0,
+        sentimentWeight: 0,
+      }
     }
 
-    if (search) {
-      filtered = filtered.filter(item =>
-        item.name.toLowerCase().includes(search.toLowerCase())
-      )
-    }
-
-    setCurrentPage(1)
-    setFilteredData(filtered.sort((a, b) => b.total_mentions - a.total_mentions))
-  }
-
-  const handleSearch = (value) => {
-    setSearchTerm(value)
-    filterData(data, value, selectedSource)
-  }
-
-  const handleSourceFilter = (value) => {
-    setSelectedSource(value)
-    filterData(data, searchTerm, value)
-  }
-
-  const sources = [...new Set(filteredData.map(d => d.source))]
-  const topPeople = filteredData.slice(0, 10)
-
-  // Pagination for detailed table
-  const totalPages = Math.ceil(filteredData.length / itemsPerPage)
-  const startIndex = (currentPage - 1) * itemsPerPage
-  const endIndex = startIndex + itemsPerPage
-  const paginatedData = filteredData.slice(startIndex, endIndex)
-
-  // Calculate person-source matrix for bias analysis - using filtered data
-  const personSourceMap = {}
-  filteredData.forEach(item => {
-    if (!personSourceMap[item.name]) {
-      personSourceMap[item.name] = {}
-    }
-    personSourceMap[item.name][item.source] = item.total_mentions
+    const group = groupedRows[key]
+    const weight = Math.max(numberValue(row.mention_weight), 1)
+    const sentiment = numberValue(row.sentiment_score)
+    group.mentions += 1
+    group.articles.add(row.article_id || row.url || row.title)
+    group.title_mentions += isTrue(row.appeared_in_title) ? 1 : 0
+    group.positive_mentions += row.sentiment_label === 'Positive' ? 1 : 0
+    group.neutral_mentions += row.sentiment_label === 'Neutral' ? 1 : 0
+    group.negative_mentions += row.sentiment_label === 'Negative' ? 1 : 0
+    group.sentimentSum += sentiment * weight
+    group.sentimentWeight += weight
   })
 
-  // Calculate bias metrics for each person
-  const peopleWithBias = Object.entries(personSourceMap).map(([name, sourceCounts]) => {
-    const mentions = Object.values(sourceCounts)
-    const total = mentions.reduce((a, b) => a + b, 0)
-    const max = Math.max(...mentions)
-    const min = Math.min(...mentions)
-    const disparity = max - min
-    const disparityPercent = ((disparity / total) * 100).toFixed(1)
-
+  return Object.values(groupedRows).map((row) => {
+    const avgSentiment = row.sentimentWeight ? row.sentimentSum / row.sentimentWeight : 0
     return {
-      name,
-      ...sourceCounts,
-      total,
-      disparity,
-      disparityPercent,
-      concentration: ((max / total) * 100).toFixed(1)
+      ...row,
+      articles: row.articles.size,
+      avg_sentiment_score: avgSentiment,
+      favorability_score: Math.round(((avgSentiment + 1) / 2) * 100),
     }
-  }).sort((a, b) => b.disparity - a.disparity)
+  })
+}
 
-  // Most biased people (high disparity)
-  const mostBiasedPeople = peopleWithBias.filter(p => p.disparity >= 3).slice(0, 12)
+function App() {
+  const [isDarkMode, setIsDarkMode] = useState(false)
+  const [selectedRange, setSelectedRange] = useState('14d')
+  const [selectedSource, setSelectedSource] = useState('all')
+  const [selectedParty, setSelectedParty] = useState('all')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [sourceData, setSourceData] = useState([])
+  const [entityData, setEntityData] = useState([])
+  const [mentionsData, setMentionsData] = useState([])
 
-  // People mentioned equally across sources (balanced coverage)
-  // Both sources must mention the person for it to be considered balanced
-  const balancedPeople = peopleWithBias
-    .filter(p => {
-      const klan = p[sourceMapping['klan']] || 0
-      const tch = p[sourceMapping['tch']] || 0
-      return p.total >= 5 && p.disparity <= 2 && klan > 0 && tch > 0
+  useEffect(() => {
+    Promise.all([
+      fetchCSV('party_source_metrics.csv'),
+      fetchCSV('political_entity_metrics.csv'),
+      fetchCSV('political_mentions.csv'),
+    ]).then(([sources, entities, mentions]) => {
+      setSourceData(sources)
+      setEntityData(entities)
+      setMentionsData(mentions)
     })
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 10)
+  }, [])
 
-  // Source comparison data - using filtered data
-  const sourceData = sources.map(source => ({
-    name: source,
-    count: filteredData.filter(d => d.source === source).length,
-    mentions: filteredData.filter(d => d.source === source).reduce((sum, d) => sum + d.total_mentions, 0)
+  const query = searchTerm.trim().toLowerCase()
+  const visibleParties = selectedParty === 'all' ? PARTIES : PARTIES.filter((party) => party.id === selectedParty)
+
+  const selectedMentionRows = useMemo(
+    () =>
+      mentionsData.filter((row) => {
+        const sourceMatches = selectedSource === 'all' || row.source === selectedSource
+        const partyMatches = selectedParty === 'all' || row.party === selectedParty
+        const searchMatches =
+          !query ||
+          `${row.title} ${row.canonical_name} ${sourceName(row.source)} ${row.context_sentence}`
+            .toLowerCase()
+            .includes(query)
+        return sourceMatches && partyMatches && searchMatches
+      }),
+    [mentionsData, selectedSource, selectedParty, query]
+  )
+
+  const selectedMetricRows = useMemo(
+    () => sourceData.filter((row) => selectedSource === 'all' || row.source === selectedSource),
+    [sourceData, selectedSource]
+  )
+
+  const selectedSourceRows = useMemo(
+    () => (query ? aggregateMentionRows(selectedMentionRows) : selectedMetricRows),
+    [query, selectedMentionRows, selectedMetricRows]
+  )
+
+  const selectedEntityRows = useMemo(
+    () => entityData.filter((row) => selectedSource === 'all' || row.source === selectedSource),
+    [entityData, selectedSource]
+  )
+
+  const sourceCoverage = useMemo(() => {
+    const coverageMap = {}
+    selectedSourceRows.forEach((row) => {
+      if (!coverageMap[row.source]) {
+        coverageMap[row.source] = { source: row.source, articles: 0, sentiment: {}, sentimentWeight: {} }
+        PARTIES.forEach(p => { 
+          coverageMap[row.source][p.id] = 0
+          coverageMap[row.source].sentiment[p.id] = 50
+          coverageMap[row.source].sentimentWeight[p.id] = 0
+        })
+      }
+      if (PARTIES.find(p => p.id === row.party)) {
+        const mentions = numberValue(row.mentions)
+        coverageMap[row.source][row.party] += mentions
+        coverageMap[row.source].articles += numberValue(row.articles)
+        if (row.favorability_score !== undefined && row.favorability_score !== '') {
+          const previousWeight = coverageMap[row.source].sentimentWeight[row.party]
+          const nextWeight = previousWeight + Math.max(mentions, 1)
+          coverageMap[row.source].sentiment[row.party] = Math.round(
+            ((coverageMap[row.source].sentiment[row.party] * previousWeight)
+              + (numberValue(row.favorability_score) * Math.max(mentions, 1))) / nextWeight
+          )
+          coverageMap[row.source].sentimentWeight[row.party] = nextWeight
+        }
+      }
+    })
+    return Object.values(coverageMap)
+  }, [selectedSourceRows])
+
+  const partyTotals = useMemo(
+    () =>
+      PARTIES.map((party) => ({
+        ...party,
+        mentions: sourceCoverage.reduce((sum, row) => sum + row[party.id], 0),
+      })),
+    [sourceCoverage]
+  )
+
+  const totalArticles = sourceCoverage.reduce((sum, row) => sum + row.articles, 0)
+  const totalMentions = partyTotals.reduce((sum, party) => sum + party.mentions, 0)
+  const topParty = [...partyTotals].sort((a, b) => b.mentions - a.mentions)[0]
+
+  const politiciansData = useMemo(() => {
+    const pMap = {}
+    const rows = query ? selectedMentionRows : selectedEntityRows
+    rows.forEach(row => {
+      if (row.entity_type === 'PERSON') {
+        const key = `${row.canonical_name}-${row.party}`
+        if (!pMap[key]) {
+          pMap[key] = { name: row.canonical_name, party: row.party, mentions: 0 }
+        }
+        pMap[key].mentions += query ? 1 : numberValue(row.mentions)
+      }
+    })
+    return Object.values(pMap).sort((a, b) => b.mentions - a.mentions)
+  }, [query, selectedEntityRows, selectedMentionRows])
+
+  const filteredPoliticians = politiciansData.filter((person) => {
+    const partyMatches = selectedParty === 'all' || person.party === selectedParty
+    const searchMatches = !query || person.name.toLowerCase().includes(query)
+    return partyMatches && searchMatches
+  })
+  const topPolitician = filteredPoliticians[0] || { name: 'None', party: 'PS' }
+  const favorability = Math.round(
+    sourceCoverage.reduce((sum, source) => {
+      const partyScores = visibleParties.map((party) => source.sentiment[party.id])
+      return sum + partyScores.reduce((a, b) => a + b, 0) / partyScores.length
+    }, 0) / Math.max(sourceCoverage.length, 1)
+  )
+
+  const chartRows = sourceCoverage.map((row) => ({
+    ...row,
+    sourceName: sourceName(row.source),
   }))
 
-  const COLORS = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#00f2fe', '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#a8edea']
+  const timelineData = useMemo(() => {
+    const datesMap = {}
+    selectedSourceRows.forEach((row) => {
+      const dateLabel = row.published_date && row.published_date !== 'unknown' ? row.published_date : 'Undated'
+      if (!datesMap[dateLabel]) {
+        datesMap[dateLabel] = { date: dateLabel }
+        PARTIES.forEach(p => { 
+          datesMap[dateLabel][p.id] = 0 
+          datesMap[dateLabel][`${p.id}_favorability`] = 50
+          datesMap[dateLabel][`${p.id}_favorabilityWeight`] = 0
+        })
+      }
+      if (PARTIES.find(p => p.id === row.party)) {
+        const mentions = numberValue(row.mentions)
+        datesMap[dateLabel][row.party] += mentions
+        if (row.favorability_score !== undefined && row.favorability_score !== '') {
+          const scoreKey = `${row.party}_favorability`
+          const weightKey = `${row.party}_favorabilityWeight`
+          const previousWeight = datesMap[dateLabel][weightKey]
+          const nextWeight = previousWeight + Math.max(mentions, 1)
+          datesMap[dateLabel][scoreKey] = Math.round(
+            ((datesMap[dateLabel][scoreKey] * previousWeight)
+              + (numberValue(row.favorability_score) * Math.max(mentions, 1))) / nextWeight
+          )
+          datesMap[dateLabel][weightKey] = nextWeight
+        }
+      }
+    })
+    return Object.values(datesMap).sort((a, b) => {
+      if (a.date === 'Undated') return 1
+      if (b.date === 'Undated') return -1
+      return a.date.localeCompare(b.date)
+    })
+  }, [selectedSourceRows])
 
-  if (loading && data.length === 0) {
-    return (
-      <div className="app">
-        <div className="loading">
-          <div className="spinner"></div>
-          <p>Loading popularity metrics...</p>
-        </div>
-      </div>
-    )
-  }
+  let timeSliced = timelineData
+  if (selectedRange === '7d') timeSliced = timelineData.slice(-7)
+  else if (selectedRange === '14d') timeSliced = timelineData.slice(-14)
+  else if (selectedRange === '30d') timeSliced = timelineData.slice(-30)
 
-  if (error) {
-    return (
-      <div className="app">
-        <div className="error">
-          <h2>⚠️ Error</h2>
-          <p>{error}</p>
-          <p style={{ marginTop: '1rem', fontSize: '0.9rem' }}>
-            Make sure to run: <code>cd bias-detection && kedro run --pipeline=popularity_metrics</code>
-          </p>
-          <button onClick={loadData}>Retry</button>
-        </div>
-      </div>
-    )
-  }
+  const filteredTimeline = timeSliced.map((row) => {
+    const next = { date: row.date }
+    visibleParties.forEach((party) => {
+      next[party.id] = row[party.id]
+    })
+    next.PS_favorability = row.PS_favorability
+    next.PD_favorability = row.PD_favorability
+    next.PL_favorability = row.PL_favorability
+    next.MUNDESIA_favorability = row.MUNDESIA_favorability
+    return next
+  })
+
+  const titleBodyRows = useMemo(() => {
+    const tMap = {}
+    PARTIES.forEach(p => tMap[p.id] = { party: p.id, title: 0, body: 0, partyName: p.short })
+    
+    selectedSourceRows.forEach(row => {
+      if (tMap[row.party]) {
+        const titleM = numberValue(row.title_mentions)
+        const totalM = numberValue(row.mentions)
+        tMap[row.party].title += titleM
+        tMap[row.party].body += (totalM - titleM)
+      }
+    })
+    return Object.values(tMap).filter((row) => selectedParty === 'all' || row.party === selectedParty)
+  }, [selectedSourceRows, selectedParty])
+
+  const recentMentionsData = useMemo(() => {
+    return selectedMentionRows
+      .map(row => ({
+        headline: row.title,
+        source: sourceName(row.source),
+        party: row.party,
+        politician: row.canonical_name,
+        tone: toneLabel(row.sentiment_label),
+        date: row.published_date,
+        rawSource: row.source
+      }))
+      .sort((a, b) => {
+        if (a.date !== b.date) return b.date ? b.date.localeCompare(a.date) : 0
+        return a.headline.localeCompare(b.headline)
+      })
+      .slice(0, 50)
+  }, [selectedMentionRows])
+
+  const recentRows = recentMentionsData.filter((row) => {
+    const searchMatches = !query || `${row.headline} ${row.politician} ${row.source}`.toLowerCase().includes(query)
+    return searchMatches
+  })
 
   return (
-    <div className="app">
-      <header className="header">
-        <div className="header-content">
-          <h1>📊 Popularity Metrics Dashboard</h1>
-          <p>News Bias Pipeline - Person Entity Analysis</p>
-        </div>
-      </header>
+    <div className={`app ${isDarkMode ? 'dark-mode' : 'light-mode'}`}>
+      <div className="monitor-shell">
+        <main className="main-content">
+          <header className="top-header">
+            <div>
+              <p className="eyebrow">Live monitoring workspace</p>
+              <h1>Political News Bias Monitor</h1>
+              <p>Real-time analysis of political media coverage in Albania</p>
+            </div>
+            <button
+              className="theme-toggle"
+              type="button"
+              onClick={() => setIsDarkMode((current) => !current)}
+              title={isDarkMode ? 'Use light mode' : 'Use dark mode'}
+              aria-label={isDarkMode ? 'Use light mode' : 'Use dark mode'}
+            >
+              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+              <span>{isDarkMode ? 'Light' : 'Dark'}</span>
+            </button>
+          </header>
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-icon">👤</div>
-          <div className="stat-info">
-            <div className="stat-value">{new Set(filteredData.map(d => d.name)).size}</div>
-            <div className="stat-label">Unique People</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon">📰</div>
-          <div className="stat-info">
-            <div className="stat-value">{sources.length}</div>
-            <div className="stat-label">News Sources</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon">📢</div>
-          <div className="stat-info">
-            <div className="stat-value">{filteredData.reduce((sum, d) => sum + d.total_mentions, 0)}</div>
-            <div className="stat-label">Total Mentions</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon">📈</div>
-          <div className="stat-info">
-            <div className="stat-value">{filteredData.length > 0 ? Math.round(filteredData.reduce((sum, d) => sum + d.total_mentions, 0) / filteredData.length) : 0}</div>
-            <div className="stat-label">Avg Mentions</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="filters">
-        <div className="search-box">
-          <Search size={20} />
-          <input
-            type="text"
-            placeholder="Search person by name..."
-            value={searchTerm}
-            onChange={(e) => handleSearch(e.target.value)}
-          />
-        </div>
-        <select value={selectedSource} onChange={(e) => handleSourceFilter(e.target.value)} className="filter-select">
-          <option value="all">All Sources</option>
-          {sources.map(source => (
-            <option key={source} value={source}>{source}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="bias-controls">
-        <div className="bias-tabs">
-          <button
-            className={`bias-tab ${biasView === 'disparity' ? 'active' : ''}`}
-            onClick={() => setBiasView('disparity')}
-          >
-            <AlertCircle size={18} /> Bias Detection
-          </button>
-          <button
-            className={`bias-tab ${biasView === 'coverage' ? 'active' : ''}`}
-            onClick={() => setBiasView('coverage')}
-          >
-            <Zap size={18} /> Coverage Analysis
-          </button>
-        </div>
-      </div>
-
-      {biasView === 'coverage' && (
-        <div className="charts-grid">
-          <div className="chart-container">
-            <h3>Top 10 Most Mentioned People</h3>
-            <ResponsiveContainer width="100%" height={400}>
-              <BarChart data={topPeople}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="total_mentions" fill="#667eea" name="Mentions" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="chart-container">
-            <h3>Mentions Distribution by Source</h3>
-            <ResponsiveContainer width="100%" height={400}>
-              <PieChart>
-                <Pie
-                  data={sourceData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, mentions }) => `${name}: ${mentions}`}
-                  outerRadius={120}
-                  fill="#8884d8"
-                  dataKey="mentions"
-                >
-                  {sourceData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+            <section className="filters">
+              <label>
+                <CalendarDays size={17} />
+                <select value={selectedRange} onChange={(event) => setSelectedRange(event.target.value)}>
+                  <option value="7d">Last 7 days</option>
+                  <option value="14d">Last 14 days</option>
+                  <option value="30d">Last 30 days</option>
+                </select>
+              </label>
+              <label>
+                <Radio size={17} />
+                <select value={selectedSource} onChange={(event) => setSelectedSource(event.target.value)}>
+                  <option value="all">All sources</option>
+                  {SOURCES.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.name}
+                    </option>
                   ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
+                </select>
+              </label>
+              <label>
+                <Flag size={17} />
+                <select value={selectedParty} onChange={(event) => setSelectedParty(event.target.value)}>
+                  <option value="all">All parties</option>
+                  {PARTIES.map((party) => (
+                    <option key={party.id} value={party.id}>
+                      {party.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="search-filter">
+                <Search size={17} />
+                <input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Search politicians, sources, headlines"
+                />
+              </label>
+            </section>
 
-      {biasView === 'disparity' && (
-        <div className="bias-analysis">
-          <div className="bias-section">
-            <h3>🚨 Most Biased Coverage</h3>
-            <p className="section-desc">People with the biggest mention gap between sources</p>
-            <div className="bias-grid">
-              {mostBiasedPeople.map((person, idx) => {
-                const klanMentions = person[sourceMapping['klan']] || 0
-                const tchMentions = person[sourceMapping['tch']] || 0
-                const isKlanFocused = klanMentions > tchMentions
-
-                return (
-                  <div key={idx} className="bias-card">
-                    <div className="bias-header">
-                      <h4>{person.name}</h4>
-                      <span className="bias-badge" title="Disparity between sources">
-                        {person.disparityPercent}% gap
-                      </span>
-                    </div>
-                    <div className="bias-bar-container">
-                      <div className="bias-source-row">
-                        <span className="source-label">{sourceMapping['klan']}</span>
-                        <div className="bias-bar">
-                          <div
-                            className="bias-fill klan"
-                            style={{width: `${(klanMentions / person.total) * 100}%`}}
-                          >
-                            {klanMentions > 0 && <span>{klanMentions}</span>}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="bias-source-row">
-                        <span className="source-label">{sourceMapping['tch']}</span>
-                        <div className="bias-bar">
-                          <div
-                            className="bias-fill tch"
-                            style={{width: `${(tchMentions / person.total) * 100}%`}}
-                          >
-                            {tchMentions > 0 && <span>{tchMentions}</span>}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="bias-meta">
-                      <span>Total: {person.total} mentions</span>
-                      <span className={isKlanFocused ? 'klan-focus' : 'tch-focus'}>
-                        {isKlanFocused ? 'KLAN-focused' : 'TCH-focused'}
-                      </span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          <div className="bias-section">
-            <h3>⚖️ Balanced Coverage</h3>
-            <p className="section-desc">People mentioned fairly equally across sources</p>
-            <div className="balanced-table">
-              <div className="table-header">
-                <div className="col-name">Person Name</div>
-                <div className="col-klan">{sourceMapping['klan']}</div>
-                <div className="col-tch">{sourceMapping['tch']}</div>
-                <div className="col-total">Total</div>
-                <div className="col-balance">Balance</div>
+            <section className="kpi-grid">
+              <div className="kpi-card">
+                <span>Total Articles</span>
+                <strong>{totalArticles.toLocaleString()}</strong>
+                <small>Across {sourceCoverage.length} monitored sources</small>
               </div>
-              {balancedPeople.map((person, idx) => {
-                const klanMentions = person[sourceMapping['klan']] || 0
-                const tchMentions = person[sourceMapping['tch']] || 0
-                const minMentions = Math.min(klanMentions, tchMentions)
-                const maxMentions = Math.max(klanMentions, tchMentions)
-                const ratio = minMentions > 0 ? (maxMentions / minMentions) : 1
+              <div className="kpi-card">
+                <span>Total Mentions</span>
+                <strong>{totalMentions.toLocaleString()}</strong>
+                <small>Party and politician references</small>
+              </div>
+              <div className="kpi-card">
+                <span>Most Mentioned Party</span>
+                <strong>{topParty.short}</strong>
+                <small>{topParty.mentions.toLocaleString()} mentions</small>
+              </div>
+              <div className="kpi-card">
+                <span>Most Mentioned Politician</span>
+                <strong>{topPolitician.name}</strong>
+                <small>{partyConfig(topPolitician.party).name}</small>
+              </div>
+              <div className="kpi-card accent">
+                <span>Favorability Score</span>
+                <strong>{favorability}%</strong>
+                <small>Positive and neutral tone blend</small>
+              </div>
+            </section>
 
-                return (
-                  <div key={idx} className="table-row">
-                    <div className="col-name">{person.name}</div>
-                    <div className="col-klan">{klanMentions}</div>
-                    <div className="col-tch">{tchMentions}</div>
-                    <div className="col-total">{person.total}</div>
-                    <div className="col-balance">
-                      <span className="balance-badge">{ratio.toFixed(1)}x</span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      )}
+            <section className="chart-grid">
+              <div className="panel wide">
+                <div className="panel-heading">
+                  <h2>Mentions Over Time</h2>
+                  <span>{selectedRange === '14d' ? '14-day trend' : 'Selected range'}</span>
+                </div>
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={filteredTimeline}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    {visibleParties.map((party) => (
+                      <Line
+                        key={party.id}
+                        type="monotone"
+                        dataKey={party.id}
+                        stroke={party.color}
+                        strokeWidth={3}
+                        dot={filteredTimeline.length <= 1}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
 
-      {biasView === 'coverage' && (
-        <div className="coverage-analysis">
-          <h3>📊 Source Coverage Comparison</h3>
-          <p className="section-desc">How different sources focus on different people</p>
-          <div className="source-comparison">
-            {sources.map((source, sourceIdx) => {
-              const sourcePersonData = filteredData
-                .filter(d => d.source === source)
-                .sort((a, b) => b.total_mentions - a.total_mentions)
-                .slice(0, 8)
+              <div className="panel wide">
+                <div className="panel-heading">
+                  <h2>Party Mentions by Source</h2>
+                  <span>Grouped comparison</span>
+                </div>
+                <ResponsiveContainer width="100%" height={330}>
+                  <BarChart data={chartRows}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="sourceName" angle={-22} textAnchor="end" height={78} />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    {visibleParties.map((party) => (
+                      <Bar key={party.id} dataKey={party.id} fill={party.color} radius={[6, 6, 0, 0]} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
 
-              return (
-                <div key={source} className="source-card">
-                  <h4>{source.toUpperCase()}</h4>
-                  <div className="source-people-list">
-                    {sourcePersonData.map((item, idx) => (
-                      <div key={idx} className="person-item">
-                        <span className="rank">#{idx + 1}</span>
-                        <span className="name">{item.name}</span>
-                        <span className="mentions">{item.total_mentions}</span>
+              <div className="panel">
+                <div className="panel-heading">
+                  <h2>Coverage Share by Party</h2>
+                  <span>All monitored sources</span>
+                </div>
+                <div className="donut-wrap">
+                  <ResponsiveContainer width="58%" height={260}>
+                    <PieChart>
+                      <Pie data={partyTotals} dataKey="mentions" innerRadius={68} outerRadius={104} paddingAngle={4}>
+                        {partyTotals.map((party) => (
+                          <Cell key={party.id} fill={party.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="legend-list">
+                    {partyTotals.map((party) => (
+                      <div key={party.id}>
+                        <span style={{ background: party.color }} />
+                        <strong>{party.name}</strong>
+                        <small>{party.mentions.toLocaleString()} mentions</small>
                       </div>
                     ))}
                   </div>
                 </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
+              </div>
 
-      {biasView === 'coverage' && (
-        <div className="table-container">
-          <h3>📋 Detailed Results ({filteredData.length} records)</h3>
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Person Name</th>
-                  <th>News Source</th>
-                  <th>Total Mentions</th>
-                  <th>Popularity %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedData.map((item, idx) => {
-                  const totalMentions = filteredData.reduce((sum, d) => sum + d.total_mentions, 0)
-                  return (
-                    <tr key={idx} className={idx % 2 === 0 ? 'even' : ''}>
-                      <td className="name-cell">{item.name}</td>
-                      <td className="source-cell">{item.source}</td>
-                      <td className="mentions-cell">
-                        <span className="badge">{item.total_mentions}</span>
-                      </td>
-                      <td className="percent-cell">
-                        {((item.total_mentions / totalMentions) * 100).toFixed(2)}%
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="pagination">
-            <button
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className="pagination-btn"
-            >
-              ← Previous
-            </button>
-            <div className="pagination-info">
-              Page {currentPage} of {totalPages}
-            </div>
-            <button
-              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage === totalPages}
-              className="pagination-btn"
-            >
-              Next →
-            </button>
-          </div>
-        </div>
-      )}
+              <div className="panel">
+                <div className="panel-heading">
+                  <h2>Most Mentioned Politicians</h2>
+                  <span>Tracked public figures</span>
+                </div>
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={filteredPoliticians.slice(0, 7)} layout="vertical" margin={{ left: 50 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" />
+                    <YAxis dataKey="name" type="category" width={110} />
+                    <Tooltip />
+                    <Bar dataKey="mentions" radius={[0, 8, 8, 0]}>
+                      {filteredPoliticians.slice(0, 7).map((person) => (
+                        <Cell key={person.name} fill={partyConfig(person.party).color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
 
-      <footer className="footer">
-        <p>Data source: Kedro Pipeline - Popularity Metrics</p>
-      </footer>
+              <div className="panel">
+                <div className="panel-heading">
+                  <h2>Title Mentions vs Body Mentions</h2>
+                  <span>Headline and article body split</span>
+                </div>
+                <ResponsiveContainer width="100%" height={270}>
+                  <BarChart data={titleBodyRows} layout="vertical" margin={{ left: 18 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" />
+                    <YAxis dataKey="partyName" type="category" width={74} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="title" stackId="mentions" name="Title" fill="#4f46e5" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="body" stackId="mentions" name="Body" fill="#7dd3fc" radius={[0, 8, 8, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="panel">
+                <div className="panel-heading">
+                  <h2>Sentiment Trend by Party</h2>
+                  <span>Favorability index</span>
+                </div>
+                <ResponsiveContainer width="100%" height={270}>
+                  <LineChart data={filteredTimeline}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="date" />
+                    <YAxis domain={[30, 70]} />
+                    <Tooltip />
+                    <Legend />
+                    {visibleParties.map((party) => (
+                      <Line
+                        key={party.id}
+                        type="monotone"
+                        dataKey={`${party.id}_favorability`}
+                        name={party.short}
+                        stroke={party.color}
+                        strokeWidth={3}
+                        dot={filteredTimeline.length <= 1}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+
+            <section className="lower-grid">
+              <div className="panel">
+                <div className="panel-heading">
+                  <h2>Source Favorability Snapshot</h2>
+                  <span>Positive + neutral tone</span>
+                </div>
+                <div className="heatmap">
+                  <div className="heatmap-header">
+                    <span>Source</span>
+                    {PARTIES.map((party) => (
+                      <span key={party.id}>{party.short}</span>
+                    ))}
+                  </div>
+                  {chartRows.slice(0, 8).map((source) => (
+                    <div className="heatmap-row" key={source.source}>
+                      <strong>{source.sourceName}</strong>
+                      {PARTIES.map((party) => {
+                        const score = source.sentiment[party.id]
+                        return (
+                          <span key={party.id} style={{ '--heat': `${score}%` }}>
+                            {score}%
+                          </span>
+                        )
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="panel recent-panel">
+                <div className="panel-heading">
+                  <h2>Recent Political Mentions</h2>
+                  <span>Article-level signals</span>
+                </div>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Headline</th>
+                        <th>Source</th>
+                        <th>Party</th>
+                        <th>Politician</th>
+                        <th>Tone</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentRows.map((row) => (
+                        <tr key={`${row.source}-${row.headline}`}>
+                          <td>{row.headline}</td>
+                          <td>{row.source}</td>
+                          <td>
+                            <span className="party-pill" style={{ background: partyConfig(row.party).color }}>
+                              {partyConfig(row.party).short}
+                            </span>
+                          </td>
+                          <td>{row.politician}</td>
+                          <td>
+                            <span className={`tone ${row.tone.toLowerCase()}`}>{row.tone}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </main>
+      </div>
     </div>
   )
 }
 
 export default App
-

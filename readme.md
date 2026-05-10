@@ -1,5 +1,7 @@
-# News Bias Detection Pipeline
-A complete pipeline for scraping news articles and analyzing media bias using NER (Named Entity Recognition) and popularity metrics.
+# Albania Political News Coverage Pipeline
+A pipeline for scraping Albanian news articles and tracking how much coverage news sources give to political parties and public figures.
+
+The project compares mentions of parties and linked individuals such as PS, PD, PL, Edi Rama, Sali Berisha, Ilir Meta, and related aliases. It produces mention-level data, aggregated party/source metrics, and a React dashboard for exploring coverage differences and trends over time.
 ## 📋 Project Structure
 ```
 news-bias-pipeline/
@@ -31,12 +33,16 @@ cd news_spiders #From root folder
 scrapy crawl tch -o ../bias-detection/data/01_raw/articles_tch.csv   # Top Channel
 scrapy crawl klan -o ../bias-detection/data/01_raw/articles_klan.csv   # Klan
 ```
-### 3. Run Bias Detection Pipeline
+### 3. Run Political Coverage Pipeline
 ```bash
 cd bias-detection #From root folder
+# Run only the political tracking pipeline after cleaned articles exist
+kedro run --pipeline=political_mentions
+
 # Run the data processing pipeline
 kedro run --pipeline=data_processing
-# OR Run all pipelines
+
+# OR run all pipelines, including legacy person popularity metrics
 kedro run
 ```
 ### 4. View Dashboard
@@ -62,12 +68,13 @@ scrapy crawl klan -v
 ```bash
 cd bias-detection # From root folder
 # Run specific pipeline
+kedro run --pipeline=political_mentions
 kedro run --pipeline=popularity_metrics
 kedro run --pipeline=data_processing
 # Run single node
 kedro run --node=extract_people_node
-# Preview pipeline (dry run)
-kedro run --dry-run
+# Show registered pipelines
+kedro registry list
 # Visualize pipeline
 kedro viz
 ```
@@ -76,9 +83,18 @@ kedro viz
 ## 📈 Pipeline Flow
 1. **Scrapy Spiders** → Collect articles (tch, klan)
 2. **Data Processing** → Clean and prepare data
-3. **Popularity Metrics** → Extract person entities
-4. **Dashboard** → Visualize bias patterns
----
+   - Normalizes article counts by source so each media outlet contributes the same number of articles
+3. **Political Mentions** → Match configured party/person aliases in titles and article text
+4. **Popularity Metrics** → Legacy spaCy person extraction
+5. **Dashboard** → Compare party/person coverage by source, date, title mentions, and article body mentions
+
+## 🗳️ Political Tracking Outputs
+The political pipeline reads `bias-detection/conf/base/political_entities.csv`.
+
+It generates:
+- `data/03_primary/political_mentions.csv` — every detected party/person mention with source, article, matched alias, title/body flag, and context.
+- `data/03_primary/political_entity_metrics.csv` — metrics grouped by source, date, party, entity, and entity type.
+- `data/03_primary/party_source_metrics.csv` — metrics grouped by source, date, and party.
 
 ## 📖 Resources
 - [Scrapy Documentation](https://docs.scrapy.org/)

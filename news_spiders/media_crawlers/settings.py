@@ -1,4 +1,4 @@
-# Scrapy settings for news_spiders project
+# Scrapy settings for the media crawler project
 #
 # For simplicity, this file contains only settings considered important or
 # commonly used. You can find more settings consulting the documentation:
@@ -7,14 +7,14 @@
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
-BOT_NAME = 'news_spiders'
+BOT_NAME = 'media_crawlers'
 
-SPIDER_MODULES = ['news_spiders.spiders']
-NEWSPIDER_MODULE = 'news_spiders.spiders'
+SPIDER_MODULES = ['media_crawlers.spiders']
+NEWSPIDER_MODULE = 'media_crawlers.spiders'
 
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
-USER_AGENT = 'news_spiders (+https://www.fshn.edu.al)'
+USER_AGENT = 'media_crawlers (+https://www.fshn.edu.al)'
 
 # Obey robots.txt rules
 ROBOTSTXT_OBEY = True
@@ -34,7 +34,7 @@ ROBOTSTXT_OBEY = True
 #COOKIES_ENABLED = False
 
 # Disable Telnet Console (enabled by default)
-#TELNETCONSOLE_ENABLED = False
+TELNETCONSOLE_ENABLED = False
 
 # Override the default request headers:
 #DEFAULT_REQUEST_HEADERS = {
@@ -42,28 +42,10 @@ ROBOTSTXT_OBEY = True
 #   'Accept-Language': 'en',
 #}
 
-# Enable or disable spider middlewares
-# See https://docs.scrapy.org/en/latest/topics/spider-middleware.html
-#SPIDER_MIDDLEWARES = {
-#    'news_spiders.middlewares.NewsSpidersSpiderMiddleware': 543,
-#}
-
-# Enable or disable downloader middlewares
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
-#DOWNLOADER_MIDDLEWARES = {
-#    'news_spiders.middlewares.NewsSpidersDownloaderMiddleware': 543,
-#}
-
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
 #EXTENSIONS = {
 #    'scrapy.extensions.telnet.TelnetConsole': None,
-#}
-
-# Configure item pipelines
-# See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-#ITEM_PIPELINES = {
-#    'news_spiders.pipelines.NewsSpidersPipeline': 300,
 #}
 
 # Enable and configure the AutoThrottle extension (disabled by default)

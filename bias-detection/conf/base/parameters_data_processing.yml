@@ -5,3 +5,8 @@
 # Link: https://docs.kedro.org/en/1.0.0/configuration/parameters.html
 
 langid_model_path: "data/06_models/langid/langid-model.txt"
+
+# Keep source article counts balanced for fair media comparison.
+# null means: use the smallest available source count after cleaning and
+# Albanian-language filtering. Set a number to cap all sources to that count.
+articles_per_source_target:

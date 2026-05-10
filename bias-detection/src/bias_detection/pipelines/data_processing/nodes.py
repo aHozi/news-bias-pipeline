@@ -3,6 +3,7 @@ This is a boilerplate pipeline 'data_processing'
 generated using Kedro 1.0.0
 """
 
+import langid
 import pandas as pd
 from langid.langid import LanguageIdentifier
 
@@ -47,3 +48,43 @@ def clean_articles(df: pd.DataFrame) -> pd.DataFrame:
 
 def combine_articles(*dfs: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(dfs, ignore_index=True)
+
+def normalize_source_article_counts(
+    df: pd.DataFrame, articles_per_source_target: int = None
+) -> pd.DataFrame:
+    """Keep the same article count per source for fair media comparison.
+
+    If no target is configured, every source is capped to the smallest available
+    source count after cleaning and language filtering. If a target is set, the
+    effective target is still capped by the smallest source so all sources stay
+    balanced.
+    """
+    if df.empty or "source" not in df.columns:
+        return df
+
+    counts = df.groupby("source").size()
+    if counts.empty:
+        return df
+
+    smallest_source_count = int(counts.min())
+    configured_target = (
+        int(articles_per_source_target)
+        if articles_per_source_target is not None and int(articles_per_source_target) > 0
+        else smallest_source_count
+    )
+    target_count = min(configured_target, smallest_source_count)
+
+    sortable = df.copy()
+    sortable["_published_sort"] = pd.to_datetime(
+        sortable.get("published_date"), errors="coerce", utc=True
+    )
+    sortable["_original_order"] = range(len(sortable))
+
+    sortable = sortable.sort_values(
+        by=["source", "_published_sort", "_original_order"],
+        ascending=[True, False, True],
+        na_position="last",
+    )
+    normalized = sortable.groupby("source", group_keys=False).head(target_count)
+    normalized = normalized.drop(columns=["_published_sort", "_original_order"])
+    return normalized.reset_index(drop=True)

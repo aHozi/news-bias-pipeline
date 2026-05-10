@@ -4,9 +4,12 @@
 
 ## Overview
 
-This is your new Kedro project, which was generated using `kedro 1.0.0`.
+This Kedro project processes scraped Albanian news articles and builds two analysis layers:
 
-Take a look at the [Kedro documentation](https://docs.kedro.org) to get started.
+* `political_mentions`: tracks configured Albanian political parties and linked public figures across source, date, title mentions, and body mentions.
+* `popularity_metrics`: legacy spaCy-based person extraction for general person popularity metrics.
+
+Before analysis, the data-processing pipeline balances article counts by source so larger media sites do not dominate the results unfairly.
 
 ## Rules and guidelines
 
@@ -34,6 +37,44 @@ You can run your Kedro project with:
 ```
 kedro run
 ```
+
+Run only the political coverage layer with:
+
+```
+kedro run --pipeline=political_mentions
+```
+
+The political entity dictionary is stored in `conf/base/political_entities.csv`.
+
+## Scrapers
+
+Scrapy spiders live in `../news_spiders/media_crawlers/spiders/`.
+
+Current pipeline sources are:
+
+```
+tch, klan, reporttv, news24, euronews, abc
+```
+
+Example scrape command:
+
+```
+cd ../news_spiders
+../venv/bin/scrapy crawl reporttv -O ../bias-detection/data/01_raw/articles_reporttv.csv
+```
+
+Ora News is not wired into the pipeline yet because the site currently returns a Cloudflare challenge to the crawler.
+
+## Political sentiment
+
+The `political_mentions` pipeline scores sentiment per mention, not per whole article. It finds the sentence where a configured politician or party is mentioned, matches Albanian positive and negative term stems, and writes:
+
+* `sentiment_label`: `Positive`, `Neutral`, or `Negative`
+* `sentiment_score`: normalized score from the mention context
+* `positive_terms` and `negative_terms`: matched evidence terms
+* `favorability_score`: aggregate positive plus half-neutral share, from 0 to 100
+
+This is a transparent lexicon-based signal. It is easy to inspect and tune, but it is not a trained sentiment model.
 
 ## How to test your Kedro project
 

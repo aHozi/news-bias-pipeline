@@ -7,3 +7,4 @@ kedro-datasets>=1.0.0
 kedro-viz>=4.0.0
 langid==1.1.6
 spacy>=3.8.14
+pytest>=8.0.0

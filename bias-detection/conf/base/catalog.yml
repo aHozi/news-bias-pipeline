@@ -8,6 +8,18 @@ articles_{source}:
   type: pandas.CSVDataset
   filepath: data/01_raw/articles_{source}.csv
 
+articles_cleaned_{source}:
+  type: pandas.CSVDataset
+  filepath: data/02_intermediate/articles_cleaned_{source}.csv
+
+articles_combined:
+  type: pandas.CSVDataset
+  filepath: data/02_intermediate/articles_combined.csv
+
+articles_albanian:
+  type: pandas.CSVDataset
+  filepath: data/02_intermediate/articles_albanian.csv
+
 # Single combined output
 articles_cleaned:
   type: pandas.CSVDataset
@@ -18,3 +30,21 @@ articles_cleaned:
 popularity_people_metrics:
   type: pandas.CSVDataset
   filepath: data/03_primary/popularity_people_metrics.csv
+
+# Political coverage reference data
+political_entities:
+  type: pandas.CSVDataset
+  filepath: conf/base/political_entities.csv
+
+# Political coverage outputs
+political_mentions:
+  type: pandas.CSVDataset
+  filepath: data/03_primary/political_mentions.csv
+
+political_entity_metrics:
+  type: pandas.CSVDataset
+  filepath: data/03_primary/political_entity_metrics.csv
+
+party_source_metrics:
+  type: pandas.CSVDataset
+  filepath: data/03_primary/party_source_metrics.csv
