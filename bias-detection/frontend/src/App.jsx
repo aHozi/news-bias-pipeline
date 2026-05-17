@@ -42,6 +42,20 @@ const PARTIES = [
   { id: 'MUNDESIA', name: 'Partia Mundësia', short: 'Mundësia', color: '#d99138' },
 ]
 
+const RANGE_DAYS = {
+  '7d': 7,
+  '14d': 14,
+  '30d': 30,
+}
+
+const RANGE_LABELS = {
+  '7d': '7-day window',
+  '14d': '14-day window',
+  '30d': '30-day window',
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
 function parseCSV(text) {
   const rows = []
   let row = []
@@ -115,6 +129,48 @@ function isTrue(value) {
   return String(value).toLowerCase() === 'true'
 }
 
+function dateValue(value) {
+  const text = String(value || '').trim()
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return null
+
+  const [, year, month, day] = match
+  const valueMs = Date.UTC(Number(year), Number(month) - 1, Number(day))
+  return Number.isFinite(valueMs) ? valueMs : null
+}
+
+function rowDateValue(row) {
+  return dateValue(row.published_date)
+}
+
+function currentDateValue() {
+  const now = new Date()
+  return Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+}
+
+function createDateWindow(rows, selectedRange) {
+  const latestDate = rows.reduce((latest, row) => {
+    const current = rowDateValue(row)
+    return current === null ? latest : Math.max(latest, current)
+  }, -Infinity)
+
+  if (!Number.isFinite(latestDate)) return null
+
+  const days = RANGE_DAYS[selectedRange] || RANGE_DAYS['14d']
+  const end = Math.max(currentDateValue(), latestDate)
+  return {
+    start: end - (days * DAY_MS),
+    end,
+  }
+}
+
+function isInDateWindow(row, dateWindow) {
+  if (!dateWindow) return true
+
+  const current = rowDateValue(row)
+  return current !== null && current >= dateWindow.start && current <= dateWindow.end
+}
+
 function aggregateMentionRows(rows) {
   const groupedRows = {}
 
@@ -152,12 +208,14 @@ function aggregateMentionRows(rows) {
   })
 
   return Object.values(groupedRows).map((row) => {
-    const avgSentiment = row.sentimentWeight ? row.sentimentSum / row.sentimentWeight : 0
+    const favorabilityScore = row.mentions
+      ? ((row.positive_mentions + (0.5 * row.neutral_mentions)) / row.mentions) * 100
+      : 50
     return {
       ...row,
       articles: row.articles.size,
-      avg_sentiment_score: avgSentiment,
-      favorability_score: Math.round(((avgSentiment + 1) / 2) * 100),
+      avg_sentiment_score: row.sentimentWeight ? row.sentimentSum / row.sentimentWeight : 0,
+      favorability_score: Math.round(favorabilityScore),
     }
   })
 }
@@ -186,10 +244,15 @@ function App() {
 
   const query = searchTerm.trim().toLowerCase()
   const visibleParties = selectedParty === 'all' ? PARTIES : PARTIES.filter((party) => party.id === selectedParty)
+  const dateWindow = useMemo(
+    () => createDateWindow([...sourceData, ...entityData, ...mentionsData], selectedRange),
+    [sourceData, entityData, mentionsData, selectedRange]
+  )
 
   const selectedMentionRows = useMemo(
     () =>
       mentionsData.filter((row) => {
+        const dateMatches = isInDateWindow(row, dateWindow)
         const sourceMatches = selectedSource === 'all' || row.source === selectedSource
         const partyMatches = selectedParty === 'all' || row.party === selectedParty
         const searchMatches =
@@ -197,14 +260,20 @@ function App() {
           `${row.title} ${row.canonical_name} ${sourceName(row.source)} ${row.context_sentence}`
             .toLowerCase()
             .includes(query)
-        return sourceMatches && partyMatches && searchMatches
+        return dateMatches && sourceMatches && partyMatches && searchMatches
       }),
-    [mentionsData, selectedSource, selectedParty, query]
+    [mentionsData, dateWindow, selectedSource, selectedParty, query]
   )
 
   const selectedMetricRows = useMemo(
-    () => sourceData.filter((row) => selectedSource === 'all' || row.source === selectedSource),
-    [sourceData, selectedSource]
+    () =>
+      sourceData.filter((row) => {
+        const dateMatches = isInDateWindow(row, dateWindow)
+        const sourceMatches = selectedSource === 'all' || row.source === selectedSource
+        const partyMatches = selectedParty === 'all' || row.party === selectedParty
+        return dateMatches && sourceMatches && partyMatches
+      }),
+    [sourceData, dateWindow, selectedSource, selectedParty]
   )
 
   const selectedSourceRows = useMemo(
@@ -213,8 +282,14 @@ function App() {
   )
 
   const selectedEntityRows = useMemo(
-    () => entityData.filter((row) => selectedSource === 'all' || row.source === selectedSource),
-    [entityData, selectedSource]
+    () =>
+      entityData.filter((row) => {
+        const dateMatches = isInDateWindow(row, dateWindow)
+        const sourceMatches = selectedSource === 'all' || row.source === selectedSource
+        const partyMatches = selectedParty === 'all' || row.party === selectedParty
+        return dateMatches && sourceMatches && partyMatches
+      }),
+    [entityData, dateWindow, selectedSource, selectedParty]
   )
 
   const sourceCoverage = useMemo(() => {
@@ -255,9 +330,17 @@ function App() {
     [sourceCoverage]
   )
 
-  const totalArticles = sourceCoverage.reduce((sum, row) => sum + row.articles, 0)
-  const totalMentions = partyTotals.reduce((sum, party) => sum + party.mentions, 0)
-  const topParty = [...partyTotals].sort((a, b) => b.mentions - a.mentions)[0]
+  const totalPoliticalArticles = useMemo(() => {
+    const articles = new Set()
+    selectedMentionRows.forEach((row) => {
+      const articleKey = row.article_id || row.url || row.title
+      if (articleKey) articles.add(articleKey)
+    })
+    return articles.size
+  }, [selectedMentionRows])
+  const visiblePartyTotals = partyTotals.filter((party) => selectedParty === 'all' || party.id === selectedParty)
+  const totalMentions = visiblePartyTotals.reduce((sum, party) => sum + party.mentions, 0)
+  const topParty = [...visiblePartyTotals].sort((a, b) => b.mentions - a.mentions)[0] || visibleParties[0] || PARTIES[0]
 
   const politiciansData = useMemo(() => {
     const pMap = {}
@@ -327,12 +410,7 @@ function App() {
     })
   }, [selectedSourceRows])
 
-  let timeSliced = timelineData
-  if (selectedRange === '7d') timeSliced = timelineData.slice(-7)
-  else if (selectedRange === '14d') timeSliced = timelineData.slice(-14)
-  else if (selectedRange === '30d') timeSliced = timelineData.slice(-30)
-
-  const filteredTimeline = timeSliced.map((row) => {
+  const filteredTimeline = timelineData.map((row) => {
     const next = { date: row.date }
     visibleParties.forEach((party) => {
       next[party.id] = row[party.id]
@@ -447,9 +525,9 @@ function App() {
 
             <section className="kpi-grid">
               <div className="kpi-card">
-                <span>Total Articles</span>
-                <strong>{totalArticles.toLocaleString()}</strong>
-                <small>Across {sourceCoverage.length} monitored sources</small>
+                <span>Political Articles</span>
+                <strong>{totalPoliticalArticles.toLocaleString()}</strong>
+                <small>With tracked political mentions</small>
               </div>
               <div className="kpi-card">
                 <span>Total Mentions</span>
@@ -477,7 +555,7 @@ function App() {
               <div className="panel wide">
                 <div className="panel-heading">
                   <h2>Mentions Over Time</h2>
-                  <span>{selectedRange === '14d' ? '14-day trend' : 'Selected range'}</span>
+                  <span>{RANGE_LABELS[selectedRange] || 'Selected range'}</span>
                 </div>
                 <ResponsiveContainer width="100%" height={280}>
                   <LineChart data={filteredTimeline}>
@@ -527,8 +605,8 @@ function App() {
                 <div className="donut-wrap">
                   <ResponsiveContainer width="58%" height={260}>
                     <PieChart>
-                      <Pie data={partyTotals} dataKey="mentions" innerRadius={68} outerRadius={104} paddingAngle={4}>
-                        {partyTotals.map((party) => (
+                      <Pie data={visiblePartyTotals} dataKey="mentions" innerRadius={68} outerRadius={104} paddingAngle={4}>
+                        {visiblePartyTotals.map((party) => (
                           <Cell key={party.id} fill={party.color} />
                         ))}
                       </Pie>
@@ -536,7 +614,7 @@ function App() {
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="legend-list">
-                    {partyTotals.map((party) => (
+                    {visiblePartyTotals.map((party) => (
                       <div key={party.id}>
                         <span style={{ background: party.color }} />
                         <strong>{party.name}</strong>
